@@ -1,0 +1,1523 @@
+
+package geofuchs.view;
+
+import javax.swing.JInternalFrame;
+import javax.swing.JToolBar;
+import javax.swing.JMenu;
+import javax.swing.JMenuItem;
+import javax.swing.JMenuBar;
+import javax.swing.*;
+import javax.swing.event.*;
+import java.awt.event.*;
+import java.awt.*;
+import java.util.*;
+import java.net.URL;
+import java.io.*;
+import javax.swing.filechooser.FileFilter;
+import javax.swing.tree.*;
+
+import geofuchs.control.*;
+import geofuchs.model.*;
+
+/**
+ *	This class represent's the application's main frame. It's 
+ *  responsible for the management and construction of child frames, 
+ *  tools, menu-related events, constructions and their relationships
+ *  to the child frames.
+ * @author Andy Stock
+ *
+ */
+
+public class GMainFrame extends JFrame implements ActionListener,ItemListener, InternalFrameListener {
+
+	  /**
+	   * This is an internal class of GMainFrame which specifies
+	   * that .geo files can be selected in the load dialogue.
+	   * @author Andy Stock
+	   */
+	  private class XMLFilter extends FileFilter
+	  {
+
+		  /** 
+		   * @see javax.swing.filechooser.FileFilter
+		   */
+		  public boolean accept(File f) {
+			  return (f.getName().toLowerCase().endsWith(".xml") || f.isDirectory());
+		  }
+
+		  /** 
+		   * @see javax.swing.filechooser.FileFilter
+		   */
+		  public String getDescription() {
+			  return "XML-Dokumente";
+		  }
+	  	}  
+
+		/**
+		   * This is an internal class of GMainFrame which specifies
+		   * that .xml files can be selected in the load dialogue.
+		   * @author Andy Stock
+		 */
+		private class GEOFilter extends FileFilter
+		{
+
+			  /**
+			  * @see javax.swing.filechooser.FileFilter
+			  */
+			  public boolean accept(File f) 
+			  {
+				  return (f.getName().toLowerCase().endsWith(".geo") ||  f.isDirectory());
+			  }
+
+				  /**
+				   * @see javax.swing.filechooser.FileFilter
+				   */
+				  public String getDescription() 
+				  {
+					  return "GeoXML-Dokumente";
+				  }		
+		
+	  }
+
+	//the currently selected tool
+	private GeoTool currentTool = new PointTool(new GeoConstruction(new String("dummy")));
+
+	//The main frame's JDesktopPane
+	GDesktopPane desktop;
+	//The menu bar
+	JMenuBar menuBar;
+	//The (left) tool bar
+	JToolBar toolBar;
+	//The status and help bars
+	GStatusBar statusBar;
+	GStatusBar helpBar;
+	//second tool bar for display options
+	JToolBar optionToolBar;
+	// the codeBase 
+	private URL codeBase=null;
+	//The list of constructions
+	private java.util.List gConstructionList;
+	//counter for automatic construction name generation
+	private int constructionCaptionCount = 1;
+	//the tree
+	GTree tree;
+	// The tree window pane
+	JScrollPane treePane;
+	//The root node of the geo-object tree.
+	DefaultMutableTreeNode root;
+	//The toolbars for graphical options
+	JToolBar[] optionBars;
+	//The currently set color
+	Color currentColor=new Color(255,0,0);
+	//The choose color button (has to be refreshed whenever a new color has been chosen)
+	JToggleButton chooseColorButton=null;
+	// The set color button
+	JToggleButton setColorButton=null;
+	//The construction tool button group 
+	ButtonGroup group=new ButtonGroup();
+	//Is anti-aliasing enabled?
+	boolean doAntiAliasing=true;
+	
+	/**
+	 * @return The currently selected tool.
+	 */
+	public String getMode()
+	{return (currentTool.getType());};
+	
+	/**
+	 * Adds a constructuion to the construction list.
+	 * @param c the construction 
+	 */
+	private void addConstruction(GeoConstruction c){
+		gConstructionList.add(c);
+		constructionCaptionCount++;
+		
+	}
+	/**
+	 * Removes the construction from the construction list.
+	 * @param c The construction. 
+	 * @return True, if the construction has been in the list, and false otherwise.
+	 */
+	private boolean removeConstruction(GeoConstruction c){
+		int index = findConstructionIndex(c);
+		if (index==-1)
+			return false;
+		gConstructionList.remove(index);
+		return true;
+	}
+	/**
+	 * Finds a construction's index in the cunstruction list.
+	 * @param c The construction.
+	 * @return The construction's index in the list, or -1 if
+	 * the construction hasn't been in the list.
+	 */
+	private int findConstructionIndex(GeoConstruction c){
+		ListIterator iter = gConstructionList.listIterator(0);
+		GeoConstruction p;
+		while(iter.hasNext()){
+			p = (GeoConstruction)iter.next();	
+			if (p==c) return iter.previousIndex();
+		}
+		return -1;
+	}
+	
+	/**
+	 * 
+	 * @return A String defining the current tool.
+	 */
+	public String getToolType()
+	{
+		return currentTool.getType();
+	}
+	
+	/**
+	 * This method returns the active construction.
+	 * @return The construction which is associated with the 
+	 * currently focused frame, or null, if there is no such frame.
+	 */
+	protected GeoConstruction getActiveConstruction(){
+		
+		GChildFrame frame = (GChildFrame)desktop.getSelectedFrame();	
+		if (frame==null)
+			return null;
+		return frame.getConstruction();
+	}
+	
+	/**
+	 * 
+	 * @return The currently focused frame.
+	 */
+	private GChildFrame getActiveFrame(){
+		
+		GChildFrame frame = (GChildFrame)desktop.getSelectedFrame();	
+		return frame;
+	}
+	/**
+	 * Closing a construction by closing all associated windows and
+	 * removing it from the construction list. 
+	 * @param c The construction.
+	 */
+	private void closeConstruction(GeoConstruction c){
+		JInternalFrame frames[] = desktop.getAllFrames();
+		GChildFrame w;
+		
+		for(int i=0;i<frames.length;i++){
+			w = (GChildFrame)frames[i];
+			if (w.getConstruction()==c)
+				w.dispose();
+		}
+		removeConstruction(c);
+		
+	}
+	/**
+	 * @param c A construction.
+	 * @return The number of associated windows.
+	 */
+	private int getNumChildWindows(GeoConstruction c)
+	{
+		JInternalFrame frames[] = desktop.getAllFrames();
+		GChildFrame w;
+		int count = 0;
+		for(int i=0;i<frames.length;i++)
+		{
+			w = (GChildFrame)frames[i];
+			if (w.getConstruction()==c)
+				count++;
+		}
+		return count;
+		
+	}
+	/**
+	 * Repaints all windows which display given construction. 
+	 * @param c The construction.
+	 * @return The number of child frames which have been repainted.
+	 */
+	public int repaintAllChildren(GeoConstruction g)
+	{
+		JInternalFrame frames[] = desktop.getAllFrames();
+		GChildFrame w;
+		int count = 0;
+		
+		for(int i=0;i<frames.length;i++){
+			w = (GChildFrame)frames[i];
+			if (w.getConstruction()==g || g==null){
+				count++;
+				w.repaint();
+			}
+		}
+		return count;
+		
+	}
+	
+	/**
+	 * The constructor methopd creates the GUI.
+	 * @param _codeBase
+	 */
+	public GMainFrame(URL codeBase) {
+		super("<<<<<GEOFUCHS 0.99>>>>>>");    	
+		this.codeBase=codeBase;
+		gConstructionList = new java.util.ArrayList();
+		
+		//Create the window
+		int inset = 50;
+		Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
+		setBounds(inset, inset, 
+		screenSize.width - inset*2, screenSize.height-inset*2);
+		setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+		addWindowListener(new WindowAdapter() {
+			public void windowClosing(WindowEvent e) {
+			a_exit();}});
+	
+		//Set up the GUI.
+		desktop = new GDesktopPane(); //a specialized layered pane
+		
+	 	setIconImage(getImageIcon("img/geofux.jpg").getImage());
+		
+		createToolBar();
+		createToolBars();
+		treePane=createTreePane();
+		
+		/*set the main window's layout */
+		JPanel contentPane = new JPanel();
+		contentPane.setPreferredSize(new Dimension(400, 100));    
+	          
+	    GridBagLayout layout=new GridBagLayout();
+	    contentPane.setLayout(layout);
+	        
+	    //help bar
+		GridBagConstraints constraints=new GridBagConstraints();
+		constraints.weightx=0;
+		constraints.weighty=0;
+		constraints.gridx=0;
+		constraints.gridy=0;
+		constraints.gridwidth=20;
+		constraints.gridheight=2;
+		constraints.fill=GridBagConstraints.BOTH;
+		constraints.anchor=GridBagConstraints.NORTH;
+		contentPane.add(createHelpBar(), constraints);
+
+		//status bar
+		constraints=new GridBagConstraints();
+		constraints.weightx=0;
+		constraints.weighty=0;
+		constraints.gridx=2;
+		constraints.gridy=18;
+		constraints.gridwidth=20;
+		constraints.gridheight=2;
+		constraints.fill=GridBagConstraints.BOTH;
+		constraints.anchor=GridBagConstraints.SOUTH;
+		contentPane.add(createStatusBar(), constraints);			
+	        
+		//construction tool bar
+		constraints=new GridBagConstraints();
+		constraints.weightx=0;
+		constraints.weighty=0;
+		constraints.gridx=0;
+		constraints.gridy=2;
+		constraints.gridwidth=2;
+		constraints.gridheight=18;
+		constraints.fill=GridBagConstraints.BOTH;
+		constraints.anchor=GridBagConstraints.WEST;
+		contentPane.add(toolBar, constraints);	
+	        
+		//"desktop"
+		constraints=new GridBagConstraints();
+		constraints.weightx=100;
+		constraints.weighty=100;
+		constraints.gridx=2;
+		constraints.gridy=2;
+		constraints.gridwidth=11;
+		constraints.gridheight=16;
+		constraints.fill=GridBagConstraints.BOTH;
+		contentPane.add(desktop, constraints);	        
+	        
+		//tree
+		constraints=new GridBagConstraints();
+		constraints.weightx=0;
+		constraints.weighty=1;
+		constraints.gridx=14;
+		constraints.gridy=2;
+		constraints.gridwidth=8;
+		constraints.gridheight=13;
+		constraints.fill=GridBagConstraints.BOTH;
+		constraints.anchor=GridBagConstraints.EAST;
+		contentPane.add(treePane, constraints);	  
+	       
+	    //drawing option tool bars
+			
+		constraints=new GridBagConstraints();
+		constraints.weightx=0;
+		constraints.weighty=0;
+		constraints.gridx=14;
+		constraints.gridy=15;
+		constraints.gridwidth=8;
+		constraints.gridheight=1;
+		constraints.fill=GridBagConstraints.BOTH;
+		constraints.anchor=GridBagConstraints.EAST;
+		contentPane.add(optionBars[0], constraints);
+		
+		constraints=new GridBagConstraints();
+		constraints.weightx=0;
+		constraints.weighty=0;
+		constraints.gridx=14;
+		constraints.gridy=16;
+		constraints.gridwidth=8;
+		constraints.gridheight=1;
+		constraints.fill=GridBagConstraints.BOTH;
+		constraints.anchor=GridBagConstraints.EAST;
+		contentPane.add(optionBars[1], constraints);	 
+			
+		constraints=new GridBagConstraints();
+		constraints.weightx=0;
+		constraints.weighty=0;
+		constraints.gridx=14;
+		constraints.gridy=17;
+		constraints.gridwidth=8;
+		constraints.gridheight=1;
+		constraints.fill=GridBagConstraints.BOTH;
+		constraints.anchor=GridBagConstraints.EAST;
+		contentPane.add(optionBars[2], constraints);
+		
+	    setContentPane(contentPane);
+		
+		setJMenuBar(createMenuBar());		
+		desktop.setBackground(Color.black);
+		a_newConstruction();
+
+	}
+	
+	
+	/**
+	 * 
+	 * @return A JScrollPane which includes a GTree.
+	 */
+	private JScrollPane createTreePane()
+	{
+		DefaultMutableTreeNode root=new DefaultMutableTreeNode();
+		this.root=root;
+		
+		//find out which kinds of algorithms exist
+		AlgorithmInfo[] aInfo=GeoConstruction.getAlgorithmInfo();
+		String[] objectTypes=new String[aInfo.length];
+		int c=0;
+		for(int i=0; i<aInfo.length; i++)
+		{
+			objectTypes[c]=aInfo[i].getDependentObjectType();
+			for(int j=0; j<c; j++)
+				if(objectTypes[j].equals(aInfo[i].getDependentObjectType())) {objectTypes[c]=null; break;}
+			if(objectTypes[c]!=null) c++;
+		}
+		c=0;
+		while(objectTypes[c]!=null)
+		{
+			int count=0;	//counter
+			DefaultMutableTreeNode node=new DefaultMutableTreeNode(objectTypes[c]);;
+			root.add(node);	
+			String algTypes[] = new String[aInfo.length];
+			for(int i=0; i<aInfo.length; i++)
+				algTypes[i]=null;
+			int d=0;
+			//now get the matching algorithm types
+			for(int i=0; i<aInfo.length; i++)
+			{
+				
+				if(objectTypes[c].equals(aInfo[i].getDependentObjectType())) algTypes[d]=aInfo[i].getName();
+				
+				for(int j=0; j<d; j++)
+					if(algTypes[j].equals(aInfo[i].getName()) || !objectTypes[c].equals(aInfo[i].getDependentObjectType())) {algTypes[d]=null; break;}
+				if(algTypes[d]!=null) d++;
+				
+			}
+			d=0;
+			while(d<aInfo.length && algTypes[d]!=null)
+			{
+				DefaultMutableTreeNode cnode=new DefaultMutableTreeNode(algTypes[d]);
+				node.add(cnode);
+				d++;
+			}
+			c++;	
+		}
+		
+		tree=new GTree(root, this);
+		DefaultTreeCellRenderer renderer = new DefaultTreeCellRenderer();
+		renderer.setClosedIcon(null);
+		renderer.setOpenIcon(null);
+		renderer.setLeafIcon(null);
+		tree.setCellRenderer(renderer);
+		tree.setExpandsSelectedPaths(true);
+		TreeSelectionModel m=new DefaultTreeSelectionModel();
+		m.setSelectionMode(DefaultTreeSelectionModel.SINGLE_TREE_SELECTION);
+		tree.setSelectionModel(m);
+		tree.setEditable(true);
+		
+		//create the pane
+		treePane=new JScrollPane(tree);
+		return treePane;
+		
+	}
+	
+	/**
+	 * 
+	 * @return A status bar containing four sections.
+	 */
+	private Container createStatusBar(){
+		statusBar = new GStatusBar(2);
+					
+		return statusBar.getStatusBar();
+	}
+	
+	/**
+	 * 
+	 * @return The help bar.
+	 */
+	private Container createHelpBar(){
+		helpBar= new GStatusBar(1);
+					
+		return helpBar.getStatusBar();
+	}
+	
+	/**
+	 * 
+	 * @param gifPath The path to a gif image.
+	 * @return The image.
+	 */
+	public ImageIcon getImageIcon(String gifPath)
+	{
+		URL url=this.getClass().getResource(gifPath);
+		if (url==null) System.exit(0);
+		return new ImageIcon(url);
+	}
+	
+	/**
+	 * Creates the (left) tool bar.
+	 */
+	protected void createToolBar(){
+	
+		toolBar = new JToolBar();	
+		toolBar.addSeparator();
+			
+		//FREE POINT/////////////////////////////////////////////
+		
+		JToggleButton button = new JToggleButton(getImageIcon("img/point.jpg"));
+		button.setSelectedIcon(getImageIcon("img/point_s.jpg"));
+		button.setToolTipText(langStrings.mi_insertPoint);
+		button.setMargin(new Insets(0,0,0,0));
+	   	button.addActionListener(new ActionListener() {
+	            public void actionPerformed(ActionEvent e) 
+	            {
+	            	a_insertPoint();
+	            }
+	        });
+	    button.setActionCommand(GeoStrings.FREEPOINT);
+	    button.setSelected(true);
+		group.add(button);
+		toolBar.add(button);
+		toolBar.addSeparator();		
+		
+		//MIDPOINT/////////////////////////////////////////////
+		button = new JToggleButton(getImageIcon("img/midpoint.jpg"));
+		button.setSelectedIcon(getImageIcon("img/midpoint_s.jpg"));
+		button.setToolTipText(langStrings.mi_calcMidpoint);
+		button.setActionCommand(GeoStrings.MIDPOINT);
+		button.setMargin(new Insets(0,0,0,0));
+		button.addActionListener(new ActionListener() {
+				public void actionPerformed(ActionEvent e) {
+					a_midPoint();
+				}
+			});
+		toolBar.add(button);
+		group.add(button);
+		toolBar.addSeparator();		
+		//TWO-POINT LINE/////////////////////////////////////////////
+		button = new JToggleButton(getImageIcon("img/line.jpg"));
+		button.setSelectedIcon(getImageIcon("img/line_s.jpg"));
+		button.setToolTipText(langStrings.mi_insertLine);
+		button.setMargin(new Insets(0,0,0,0));
+		button.addActionListener(new ActionListener() {
+			public void actionPerformed(ActionEvent e) 
+			{
+				a_insertLine();
+			}
+	    });
+		toolBar.add(button);
+		group.add(button);
+		toolBar.addSeparator();		
+
+		//ORTHOLINE/////////////////////////////////////////////
+		button = new JToggleButton(getImageIcon("img/senk.jpg"));
+		button.setSelectedIcon(getImageIcon("img/senk_s.jpg"));
+		button.setMargin(new Insets(0,0,0,0));
+		button.setToolTipText(langStrings.mi_senk);
+	    button.addActionListener(new ActionListener() {
+			public void actionPerformed(ActionEvent e) 
+	        {
+	            a_ortho();
+	        }
+		});
+		group.add(button);
+		toolBar.add(button);
+		toolBar.addSeparator();		
+		
+		//PARALLEL LINE/////////////////////////////////////////////
+		button = new JToggleButton(getImageIcon("img/par.jpg"));
+		button.setSelectedIcon(getImageIcon("img/par_s.jpg"));
+		button.setToolTipText(langStrings.mi_par);
+		button.setMargin(new Insets(0,0,0,0));
+		button.addActionListener(new ActionListener() {
+			public void actionPerformed(ActionEvent e) 
+			{
+	                a_par();
+	        }
+	    });
+		group.add(button);
+		toolBar.add(button);
+		toolBar.addSeparator();
+		
+		//TWO-POINT circle/////////////////////////////////////////////
+		button = new JToggleButton(getImageIcon("img/circ.jpg"));
+		button.setSelectedIcon(getImageIcon("img/circ_s.jpg"));
+		button.setToolTipText(langStrings.mi_circ);
+		button.setMargin(new Insets(0,0,0,0));
+		button.addActionListener(new ActionListener() 
+		{
+			public void actionPerformed(ActionEvent e) 
+			{
+				a_insertCirc();
+			}
+		});
+		group.add(button);	
+		toolBar.add(button);
+		toolBar.addSeparator();
+
+		//UNDO/////////////////////////////////////////////
+		button = new JToggleButton(getImageIcon("img/undo.jpg"));
+		button.setToolTipText(langStrings.mi_undo);
+		button.setMargin(new Insets(0,0,0,0));
+		button.addActionListener(new ActionListener() 
+		{
+			public void actionPerformed(ActionEvent e) 
+			{
+				a_undo();
+			}
+		});
+		toolBar.add(button);
+		toolBar.addSeparator();
+		
+		//REDO/////////////////////////////////////////////
+		button = new JToggleButton(getImageIcon("img/redo.jpg"));
+		button.setToolTipText(langStrings.mi_redo);
+		button.setMargin(new Insets(0,0,0,0));
+		button.addActionListener(new ActionListener() {
+			public void actionPerformed(ActionEvent e) 
+			{
+				a_redo();
+			}
+		});
+		toolBar.add(button);
+		toolBar.addSeparator();
+		
+		//CHANGE/////////////////////////////////////////////
+		//TODO
+		button = new JToggleButton(getImageIcon("img/del.jpg"));
+		button.setSelectedIcon(getImageIcon("img/del_s.jpg"));				
+		button.setToolTipText(langStrings.mi_change);
+		button.setMargin(new Insets(0,0,0,0));
+		button.addActionListener(new ActionListener() 
+		{
+			public void actionPerformed(ActionEvent e) 
+			{
+				a_change();
+			}
+		});
+		group.add(button);
+		toolBar.add(button);
+		toolBar.addSeparator();
+		
+		toolBar.setFloatable(false);
+		toolBar.setOrientation(javax.swing.SwingConstants.VERTICAL);
+
+	}
+
+	/**
+	 * This method creates the three drawing options tool bars.
+	 * @return The tool bars.
+	 */
+	protected JToolBar[] createToolBars()
+	{
+		optionBars=new JToolBar[3];
+		for(int i=0; i<3; i++)
+		{
+			optionBars[i]=new JToolBar();
+			optionBars[i].setFloatable(false);
+			optionBars[i].setOrientation(javax.swing.SwingConstants.HORIZONTAL);
+		}
+
+		//Hide
+		JToggleButton button = new JToggleButton(getImageIcon("img/hide.jpg"));
+		button.setSelectedIcon(getImageIcon("img/hide_s.jpg"));
+	 	button.setToolTipText(langStrings.mi_hide);
+		button.setMargin(new Insets(0,0,0,0));
+		
+		button.addActionListener(new ActionListener() 
+		{
+			public void actionPerformed(ActionEvent e) 
+			{
+				a_emph(0);
+			}
+		});
+		group.add(button);	  		  
+	 	optionBars[0].add(button);
+		
+		//set normal emphasis	
+		button = new JToggleButton(getImageIcon("img/normal.jpg"));
+		button.setSelectedIcon(getImageIcon("img/normal_s.jpg"));
+		button.setToolTipText(langStrings.mi_normalsize);
+		button.setMargin(new Insets(0,0,0,0));
+		button.addActionListener(new ActionListener() 
+		{
+			public void actionPerformed(ActionEvent e) 
+			{
+				a_emph(1);
+			}
+		});
+		group.add(button);		  		  
+		optionBars[0].add(button);
+		
+		//Emphasized
+		
+		button = new JToggleButton(getImageIcon("img/emph1.jpg"));
+		button.setSelectedIcon(getImageIcon("img/emph1_s.jpg"));
+		button.setToolTipText(langStrings.mi_emph1);
+		button.setMargin(new Insets(0,0,0,0));
+		button.addActionListener(new ActionListener()
+		{
+			public void actionPerformed(ActionEvent e) 
+			{
+				a_emph(2);
+			}
+		});
+		group.add(button);		  		  
+		optionBars[0].add(button);		
+		
+		//Emphasize more		
+		button = new JToggleButton(getImageIcon("img/emph2.jpg"));
+		button.setSelectedIcon(getImageIcon("img/emph2_s.jpg"));
+		button.setToolTipText(langStrings.mi_emph2);
+		button.setMargin(new Insets(0,0,0,0));
+		button.addActionListener(new ActionListener() 
+		{
+			public void actionPerformed(ActionEvent e) 
+			{
+				a_emph(3);
+			}
+		});
+		group.add(button);	
+		optionBars[0].add(button);	
+
+		//Rename
+		button = new JToggleButton(getImageIcon("img/setname.jpg"));
+		button.setSelectedIcon(getImageIcon("img/setname_s.jpg"));
+		button.setToolTipText(langStrings.mi_setname);
+		button.setMargin(new Insets(0,0,0,0));
+		button.addActionListener(new ActionListener() 
+		{
+			public void actionPerformed(ActionEvent e) 
+			{
+				a_setname();
+			}
+		});
+		group.add(button);	  
+		optionBars[1].add(button);		
+		
+		//Display or hide name
+		button = new JToggleButton(getImageIcon("img/showname.jpg"));
+		button.setSelectedIcon(getImageIcon("img/showname_s.jpg"));
+		button.setToolTipText(langStrings.mi_dontshowname);
+		button.setMargin(new Insets(0,0,0,0));		
+		button.addActionListener(new ActionListener() 
+		{
+			public void actionPerformed(ActionEvent e) 
+			{
+				a_showname();
+			}
+		}); 
+		group.add(button);	    
+		optionBars[1].add(button);	
+	
+		//Choose a color	
+		button = new JToggleButton();
+		chooseColorButton=button;
+		button.setBackground(currentColor);
+		button.setForeground(currentColor);
+		button.setToolTipText(langStrings.mi_color);
+		button.setMinimumSize(new Dimension(32,32));
+		button.addActionListener(new ActionListener() 
+		{
+			public void actionPerformed(ActionEvent e) 
+			{
+				a_color(); 	
+			}
+		}); 
+		optionBars[2].add(button);	
+
+		//Set a color
+		button = new JToggleButton(getImageIcon("img/color.jpg"));
+		button.setSelectedIcon(getImageIcon("img/color_s.jpg"));
+		button.setToolTipText(langStrings.mi_setcolor);
+		button.setMargin(new Insets(0,0,0,0));
+		button.addActionListener(new ActionListener() 
+		{
+			public void actionPerformed(ActionEvent e) 
+			{
+				a_setcolor(); 	
+			}
+		}); 
+  		setColorButton=button;  
+		group.add(button); 
+		optionBars[2].add(button);					
+		
+		return optionBars;	
+		
+	}
+
+	/**
+ 	* This method shows a color chosser dialogue, waits for the
+ 	* user's input and enables the set color mode.	 
+ 	*
+ 	*/
+	protected void a_color() 
+	{
+		currentColor=JColorChooser.showDialog(this, langStrings.q_chooseColor,currentColor);
+		chooseColorButton.setForeground(currentColor);
+		chooseColorButton.setBackground(currentColor);
+		chooseColorButton.repaint();
+		chooseColorButton.setVisible(false);
+		chooseColorButton.setVisible(true);
+		setColorButton.doClick();
+	}
+
+	/**
+	 * Sets the current tool to the set color tool.
+	 */
+	protected void a_setcolor() 
+	{
+		currentTool=new ColorTool(getActiveConstruction());
+		repaint();
+	}
+
+	/**
+	* Sets the current tool to the show name tool.
+	*/
+	protected void a_showname() 
+	{
+		currentTool=new ShowNameTool(getActiveConstruction());
+		
+		repaint();
+	}
+	
+	/**
+	* Sets the current tool to the set name tool.
+	*/
+	protected void a_setname() 
+	{
+		currentTool=new SetNameTool(getActiveConstruction());	
+		
+		repaint();
+	}
+	
+	/**
+	 * Sets the object's emphasis factor.
+	 * @param factor 0-hidden 1-normal 2-emphasized 3-more emphasized
+	 */
+	protected void a_emph(int factor) 
+	{
+		currentTool=new EmphTool(getActiveConstruction(), factor);	
+		
+		repaint();	
+	}
+	
+	/**
+	 * This method creates the menu bar.
+	 * @return The menu bar.
+	 */
+	protected JMenuBar createMenuBar() 
+	{
+	        menuBar = new JMenuBar();
+	        //FILE MENU
+	        JMenu menu = new JMenu(langStrings.mi_file);
+	        menu.setMnemonic(langStrings.mim_file);
+        
+        	///NEW CONSTRUCTION///////////////////////////////////////////
+	        JMenuItem menuItem = new JMenuItem(langStrings.mi_newConstruction);
+	        
+	        menuItem.addActionListener(new ActionListener() 
+	        {
+	            public void actionPerformed(ActionEvent e) 
+	            {
+	                a_newConstruction();
+	            } 
+	        });
+	        menuItem.setMnemonic(langStrings.mim_newConstruction);
+	        menu.add(menuItem);
+	        
+	        //NEW WINDOW////////////////////////////////////////////
+	        menuItem = new JMenuItem(langStrings.mi_newChildFrame);
+	        menuItem.addActionListener(new ActionListener() 
+	        {
+	            public void actionPerformed(ActionEvent e) 
+	            {
+	                a_newChildFrame();
+	            }
+	        });
+	        menuItem.setMnemonic(langStrings.mim_newChildFrame);
+	        menu.add(menuItem);
+
+			//SAVE  CONSTRUCTION////////////////////////////////////////////
+			menuItem = new JMenuItem(langStrings.mi_saveConstruction);
+			menuItem.addActionListener(new ActionListener() {
+			public void actionPerformed(ActionEvent e) {
+			a_save();}});
+			menuItem.setMnemonic(langStrings.mim_saveConstruction);
+			menu.add(menuItem);	        
+	        
+			//SAVE  CONSTRUCTION AS////////////////////////////////////////////
+			menuItem = new JMenuItem(langStrings.mi_saveConstructionAs);
+			menuItem.addActionListener(new ActionListener() {
+			public void actionPerformed(ActionEvent e) {
+			a_saveas();}});
+			menuItem.setMnemonic(langStrings.mim_saveConstructionAs);
+			menu.add(menuItem);	   
+	        
+			//LOAD CONSTRUCTION////////////////////////////////////////////
+			menuItem = new JMenuItem(langStrings.mi_loadConstruction);
+			menuItem.addActionListener(new ActionListener() {
+				public void actionPerformed(ActionEvent e) {
+					a_load();}});
+			menuItem.setMnemonic(langStrings.mim_loadConstruction);
+			menu.add(menuItem);	   	        
+	        
+	        //CLOSE CONSTRUCTION/////////////////////////////////////////
+	        menuItem = new JMenuItem(langStrings.mi_closeConstruction);	        
+	        menuItem.addActionListener(new ActionListener() {
+	            public void actionPerformed(ActionEvent e) {
+	                a_closeConstruction();}});
+	        menuItem.setMnemonic(langStrings.mim_closeConstruction);
+	        menu.add(menuItem);
+
+	        //CLOSE CHILD WINDOW/////////////////////////////////////
+	        menuItem = new JMenuItem(langStrings.mi_closeActiveWindow);
+	        
+	        menuItem.addActionListener(new ActionListener() {
+	            public void actionPerformed(ActionEvent e) {
+	                a_closeActiveWindow();}});
+	        menuItem.setMnemonic(langStrings.mim_closeActiveWindow);
+	        menu.add(menuItem);
+
+	        ///EXIT////////////////////////////////////////////////////////////
+	      	menu.addSeparator();
+	        menuItem = new JMenuItem(langStrings.mi_exit);
+	        menuItem.addActionListener(new ActionListener() {
+	            public void actionPerformed(ActionEvent e) {
+	                a_exit();
+	            }
+	        });
+	        menuItem.setMnemonic(langStrings.mim_exit);
+	        menu.add(menuItem);
+	        menuBar.add(menu);
+	        
+			//////////////////////////////EDIT//////////////////////
+			menu = new JMenu(langStrings.mi_edit);
+			menu.setMnemonic(langStrings.mim_edit);
+	        menuBar.add(menu);	        
+			//UNDO//////////////////////////////////////////////
+			menuItem = new JMenuItem(langStrings.mi_undo,getImageIcon("img/undo.jpg"));
+			menuItem.addActionListener(new ActionListener() 
+			{
+				public void actionPerformed(ActionEvent e) {
+						  a_undo();
+				}
+			});
+			menuItem.setMnemonic(langStrings.mim_undo);
+			menuItem.setAccelerator(KeyStroke.getKeyStroke(
+			KeyEvent.VK_Z, 0));
+			menu.add(menuItem);
+	        //REDO////////////////////////////////////////////////
+			menuItem = new JMenuItem(langStrings.mi_redo,getImageIcon("img/redo.jpg"));
+			menuItem.addActionListener(new ActionListener() {
+			public void actionPerformed(ActionEvent e) {
+					  a_redo();
+				  }
+			  });
+			menuItem.setMnemonic(langStrings.mim_undo);
+			menuItem.setAccelerator(KeyStroke.getKeyStroke(
+			KeyEvent.VK_Y, 0));
+			menu.add(menuItem);
+	        
+	       //VIEW////////////////////////////////////////////////
+	     	menu = new JMenu(langStrings.mi_view);
+	        menu.setMnemonic(langStrings.mim_view);
+	     
+	     
+	   		//ANTI-ALIASING/////////////////////////////////////
+	    	JCheckBoxMenuItem cbItem=new JCheckBoxMenuItem(langStrings.mi_antialias, true); 	
+			cbItem.addActionListener(new ActionListener() 
+			{
+				public void actionPerformed(ActionEvent e) 
+				{
+					a_AntiAliasingOptionChanged();
+				}
+			});
+	    	 menu.add(cbItem);	
+	    	 
+			///SHOW COORDiNATE AXES/////////////////////////////////////////////////////
+			menuItem = new JMenuItem(langStrings.mi_switchCoords,getImageIcon("img/p_coords.jpg"));
+	        menuItem.addActionListener(new ActionListener() 
+	        {
+	            public void actionPerformed(ActionEvent e) {
+	                a_switchCoordAxess();
+	            }
+	        });
+	        menuItem.setMnemonic(langStrings.mim_switchCoords);
+	        menu.add(menuItem);
+	     	
+	     	//SHOW GRID///////////////////////////////////////////////////////////
+	     	menuItem = new JMenuItem(langStrings.mi_switchGrid,getImageIcon("img/p_grid.jpg"));
+	        menuItem.addActionListener(new ActionListener() 
+	        {
+	            public void actionPerformed(ActionEvent e) 
+	            {
+	                a_switchGrid();
+	             }
+	        });
+	        menuItem.setMnemonic(langStrings.mim_switchGrid);
+	        menu.add(menuItem);
+
+	     	///ZOOMIN//////////////////////////////////////////////////////////
+	     	menu.addSeparator();
+	     	menuItem = new JMenuItem(langStrings.mi_zoomIn,getImageIcon("img/p_zoomin.jpg"));        
+	        menuItem.addActionListener(new ActionListener() {
+	            public void actionPerformed(ActionEvent e) {
+	                a_zoomIn();}});
+	        menuItem.setMnemonic(langStrings.mim_zoomIn);	        
+	        menu.add(menuItem);
+
+	     	//ZOOMOUT//////////////////////////////////////////////////////////
+	     	menuItem = new JMenuItem(langStrings.mi_zoomOut,getImageIcon("img/p_zoomout.jpg"));	        
+	        menuItem.addActionListener(new ActionListener() {
+	            public void actionPerformed(ActionEvent e) {
+	                a_zoomOut();}});
+	        menuItem.setMnemonic(langStrings.mim_zoomOut);
+	        menu.add(menuItem);
+	        
+	     	//RESET VIEW//////////////////////////////////////////////////////	     	
+	     	menuItem = new JMenuItem(langStrings.mi_resetView,getImageIcon("img/p_resetView.jpg"));	        
+	        menuItem.addActionListener(new ActionListener() {
+	            public void actionPerformed(ActionEvent e) {
+	                a_resetView();}});
+	        menuItem.setMnemonic(langStrings.mim_resetView);        
+	        menu.add(menuItem);
+	        menu.addSeparator();
+	    
+	     	menuBar.add(menu);
+	     
+
+			//>>>>>>>OPTIONS<<<<<<<<<<<<<<<//////////////////////////////
+	     	menu = new JMenu(langStrings.mi_options);
+	        menu.setMnemonic(langStrings.mim_options);
+	     		     	
+	     	//ABOUT BOX////////////////////////////////////////////
+	     	menuItem = new JMenuItem(langStrings.mi_about);
+	        menuItem.addActionListener(new ActionListener() {
+	            public void actionPerformed(ActionEvent e) {
+	                a_about();
+	            }
+	        });
+	        menuItem.setMnemonic(langStrings.mim_about);	        
+	        menu.add(menuItem);		
+	     	menuBar.add(menu);
+		
+			//menu bar state changer....if there are no child windows,
+			//some entries should be disabled.
+			mbs1();
+		
+	        return menuBar;
+    }
+
+	/**
+	 * This method changes the menu bar's state, enabling or disabling
+	 * certain enties respective of the existance of child windows.
+	 *
+	 */
+	protected void mbs1()
+	{
+		boolean state = false;
+		GeoConstruction g = getActiveConstruction();
+		if (g!=null) 
+			state=true;		
+		JMenu m = menuBar.getMenu(0);	
+		JMenuItem mi; 
+		
+		for(int i=0;i<3;i++){
+			mi=m.getItem(i+1);	
+			mi.setEnabled(state);
+		}
+	}
+
+
+    
+	/**
+	 * Create a new child frame which displays a construction.
+	 * @param c The construction to be displayed.
+	 */
+	
+	private void createChildFrame(GeoConstruction c)
+	{
+		GChildFrame frame =new GChildFrame(c.getViewCaption(),c,this);
+		frame.setVisible(true);
+		desktop.add(frame);
+		frame.addInternalFrameListener(this);
+		try {
+			frame.setSelected(true);
+		} catch (java.beans.PropertyVetoException e) {}		
+	}
+
+
+	/**
+	 * Create a new construction and an associated child frame.
+	 *
+	 */
+	public void a_newConstruction()
+	{
+		GeoConstruction g = new GeoConstruction(langStrings.c_Construction+constructionCaptionCount+".geo");
+		addConstruction(g);
+		createChildFrame(g);
+		mbs1();
+	}
+	
+	/**
+	 * /**
+	 * Create a new construction and an associated child frame.
+	 * @param name The construction's name.
+	 */
+	public void a_newConstruction(String name)
+	{
+		GeoConstruction g = new GeoConstruction(name);
+		addConstruction(g);
+		createChildFrame(g);
+		mbs1();
+	}
+
+	/**
+	 * Create a new child frame which displays the active
+	 * construction.
+	 */
+	public void a_newChildFrame()
+	{
+		GeoConstruction g = getActiveConstruction();
+		if (g==null)
+		{
+			mbs1(); 
+			return;
+		}
+		createChildFrame(g);
+	}
+	/**
+	 * Closes the active construction and all associated child frames.
+	 */
+	public void a_closeConstruction(){
+		
+		GeoConstruction g = getActiveConstruction();
+		if (g==null) return;
+		//request
+		if (closeConstructionDialog(langStrings.q_AskCloseConstruction+" "+g.getName()))
+			closeConstruction(g);
+
+	}
+	
+	/**
+	* This method shows a file selection dialog and loads a construction from the selected file.
+	*/	
+	public void a_load()
+	{	//create a new construction and load its contained geometric objects from a file
+		String filename=getFileName();
+		if(filename==null) return;
+		a_newConstruction(filename);
+		GeoConstruction construction=getActiveConstruction();
+		//load the construction
+		construction.load(filename); 
+		construction.setName(filename);
+	}	
+
+	/**
+	 * This method saves the active construction after opening a file selection window.
+	 */	
+	public void a_saveas()
+	{	
+		GeoConstruction construction=getActiveConstruction();
+		String filename=getFileName();
+		if(filename!=null) 
+		{	
+			construction.save(filename); 
+			construction.setName(filename);
+			updateChildWindowCaptions();
+		}
+	}
+	
+	/**
+	 * Saves the active construction under its current name.
+	 *
+	 */	
+	public void a_save()
+	{	
+		GeoConstruction construction=getActiveConstruction();
+		construction.save(construction.getName()); 
+	}
+		
+	/** Close the active child frame. If it's the last one,
+	 *  show a confirmation dialogue.
+	 */
+	public void a_closeActiveWindow()
+	{
+		GChildFrame c = getActiveFrame();
+		if (c==null)
+		return;
+		c.doDefaultCloseAction();
+	}
+	
+	/**
+	 * The application's heart: The exit method. Good to have guests,
+	 * but even better when they leave.
+	 */
+	 
+	public void a_exit(){
+		if(closeConstructionDialog(langStrings.s_suretoquit))
+		{
+			//normal mode
+			if (codeBase==null)	
+				System.exit(0);
+			//applet mode
+			else	
+				this.dispose();
+		}
+	}
+
+
+	/** Sets the current tool to a new MidPointTool.*/
+	public void a_midPoint()
+	{
+		currentTool=new MidPointTool(getActiveConstruction());
+		
+	}
+	
+	/**  Sets the current tool to a new OrthoTool.*/
+	public void a_ortho()
+	{
+		currentTool=new OrthoTool(getActiveConstruction()); 
+		
+	}
+	
+	/** Sets the current tool to a new ParaTool.*/
+	public void a_par()
+	{
+		currentTool=new ParaTool(getActiveConstruction()); 
+		
+	}
+	
+ 	/** Sets the current tool to a new ChangerTool.*/ 
+	public void a_change()
+	{
+		currentTool=new ChangerTool(getActiveConstruction()); 
+		
+	}
+
+	/** Removes the most recently added geometric object from the active construction (if possible). */
+	public void a_undo()
+	{	
+		if(getActiveConstruction()==null) return;	
+		getActiveConstruction().undo();
+		refreshTree();
+		repaintAllChildren(getActiveConstruction());	
+
+	}
+
+	/** Readds the most recently "undone" geometric object from the active construction. */
+	public void a_redo()
+	{
+		if(getActiveConstruction()==null) return;	
+		getActiveConstruction().redo();
+		refreshTree();	
+		repaintAllChildren(getActiveConstruction());
+	}
+
+	/** Toggles the anti aliasing option.*/
+	public void a_AntiAliasingOptionChanged()
+	{
+		doAntiAliasing=!doAntiAliasing;
+		JInternalFrame frames[] = desktop.getAllFrames();
+		GChildFrame w;
+		RenderingHints renderingHints=new RenderingHints(null);
+
+		if(doAntiAliasing)
+		{
+			renderingHints.put(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+			renderingHints.put(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+		}
+		else
+		{
+			renderingHints.put(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
+			renderingHints.put(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF);				
+		}
+		
+		for(int i=0;i<frames.length;i++)
+		{
+			w = (GChildFrame)frames[i];
+			w.setRenderingHints(renderingHints);
+			w.repaint();
+		}
+	}
+	
+	/** Sets the current tool to a new PointTool. */
+	public void a_insertPoint()
+	{
+		currentTool=new PointTool(getActiveConstruction());
+		
+	}
+	
+	/** Sets the current tool to a new TwoPointLineTool.*/
+	public void a_insertLine()
+	{
+		currentTool=new TwoPointLineTool(getActiveConstruction()); 
+			
+	}
+	/**Sets the current tool to a new TwoPointCircleTool. **/
+	public void a_insertCirc()
+	{
+		currentTool=new TwoPointCircleTool(getActiveConstruction());
+		
+	}
+	
+
+	/** Toggles the grid display option (on/off)*/
+	public void a_switchGrid()
+	{
+		GChildFrame f = getActiveFrame();
+		if (f!=null){
+			f.switchGrid(); 
+		}
+	}
+	/** Toggles the coord axes display option (on/off)*/
+	public void a_switchCoordAxess()
+	{
+		GChildFrame f = getActiveFrame();
+		if (f!=null)
+			f.switchCoordAxes();       
+	}
+	/** Zooms into the active child frame. */
+	public void a_zoomIn(){
+		GChildFrame f = getActiveFrame();
+		if (f!=null){
+			f.zoomIn();     
+		}
+	
+	}
+	/** Zooms out of the active child frame. */
+	public void a_zoomOut()
+	{
+		GChildFrame f = getActiveFrame();
+		if (f!=null){
+			f.zoomOut();    
+		}
+	}
+	/** Resets the active child frame's zoom factor.*/
+	public void a_resetView()
+	{
+		GChildFrame f = getActiveFrame();
+		if (f!=null){
+			f.resetView();  
+		}
+	}
+
+	/** Shows a brief about box. **/
+	public void a_about()
+	{	
+		JOptionPane.showOptionDialog(this,
+			langStrings.q_info,"",
+			JOptionPane.OK_OPTION,
+			JOptionPane.WARNING_MESSAGE  ,
+			null,
+			null,
+			null);	
+	}
+    
+
+    
+    /** Creates a dialogue which displays the given String and 
+    * contains a Yes and a No button. 
+    * @param s The text to display.
+    * @return True, if the Yes button hasa been pressed, and false otherwise.
+    */
+	public boolean closeConstructionDialog(String s)
+	{    	
+	    boolean selection = false;
+		Object[] options = {langStrings.s_yes, langStrings.s_no};
+		int n = JOptionPane.showOptionDialog(this,
+		s,"",
+		JOptionPane.YES_NO_OPTION,
+		JOptionPane.QUESTION_MESSAGE,
+		null,
+		options,
+		options[0]);
+		if (n == JOptionPane.YES_OPTION) {
+			return true;
+		} else if (n == JOptionPane.NO_OPTION) {
+			return selection;
+		} else {
+			return selection;
+		}	
+	}
+
+	/** 
+	 * This method is called whenever the user tries to close a child frame.
+	 * If the child frame is the only one which is associated with 
+	 * a construction, this will result in closing the construction as well.
+	 * For that reason, a confirmation dialogue is shown in this case.
+	 */
+	private boolean cmsg_childClosing(GChildFrame c)
+	{
+		if (!(c instanceof GChildFrame))
+			return false;
+		GeoConstruction g = c.getConstruction();
+		if (getNumChildWindows(g)==1){
+			return closeConstructionDialog(langStrings.q_AskCloseLastWindow+" "+g.getName());
+		}
+		return true;	
+	}
+	
+	/**
+	 * Shows a file selection dialog.
+	 * @return Name and path of the selected file, or null if the selection was canceled.
+	 */
+	private String getFileName()
+	{
+		JFileChooser chooser=new JFileChooser();
+		chooser.setCurrentDirectory(new File("."));
+		chooser.setFileFilter(new XMLFilter());
+		chooser.setFileFilter(new GEOFilter());		
+		int result = chooser.showDialog(this, langStrings.q_choosefile);
+		//cancel button
+		if(result==JFileChooser.CANCEL_OPTION) return null;
+		//file selected
+		else return chooser.getSelectedFile().getPath();	
+	}
+
+	/**
+	 * This is a callback method which does nothing at all.
+	 */
+	public void itemStateChanged(ItemEvent e){};
+	
+	/**
+	 * This is a callback method which does nothing at all.
+	 */	
+	public void actionPerformed(ActionEvent e){};
+	
+	/**
+	 * This callback method is called whenever the user tries
+	 * to close a child window.
+	 */
+	public void internalFrameClosing(InternalFrameEvent e) {
+		JInternalFrame c = (JInternalFrame)e.getInternalFrame();
+		
+		if (c==null)
+			return;
+		if(cmsg_childClosing((GChildFrame)c)){
+			c.dispose();
+		return;
+		}
+	}
+	
+	/** Enables/disables affected menu entries. */
+	public void internalFrameClosed(InternalFrameEvent e) {
+		mbs1();
+	}
+	/** Enables/disables affected menu entries. */
+	public void internalFrameOpened(InternalFrameEvent e) {
+		mbs1(); 
+	}
+	/** Enables/disables affected menu entries. */
+	public void internalFrameIconified(InternalFrameEvent e) {
+		mbs1(); 
+	}
+	/** Enables/disables affected menu entries. */
+	public void internalFrameDeiconified(InternalFrameEvent e) {
+		mbs1(); 
+	}
+	/** Enables/disables affected menu entries. */
+	public void internalFrameActivated(InternalFrameEvent e) {
+		mbs1(); 
+	}
+	/** Enables/disables affected menu entries. */
+	public void internalFrameDeactivated(InternalFrameEvent e) {
+		mbs1(); 
+	}
+
+	/**
+	 * This method updates the child windows' captions.
+	 */
+	private void updateChildWindowCaptions()
+	{
+		JInternalFrame frames[] = desktop.getAllFrames();
+		GChildFrame w;
+		for(int i=0;i<frames.length;i++)
+		{
+			w = (GChildFrame)frames[i];
+			w.setTitle(w.myConstruction.getViewCaption());
+		}
+	}
+
+	/**
+	 * This method refreshes the displayed construction tree. 
+	 *
+	 */
+	protected void refreshTree()
+	{
+		if(getActiveConstruction()==null) return;
+		//get the object type nodes
+		DefaultMutableTreeNode onodes[]=new DefaultMutableTreeNode[root.getChildCount()];
+		int count=0;		//number of childs of all object type nodes
+		for(int i=0; i<root.getChildCount(); i++)
+		{
+			onodes[i]=(DefaultMutableTreeNode) root.getChildAt(i);
+			count+=onodes[i].getChildCount();
+		}
+		
+		//get the algorithm type nodes
+		DefaultMutableTreeNode cnodes[]=new DefaultMutableTreeNode[count];
+		
+		count=0; //...counts the iterations now!
+		for(int i=0; i<onodes.length; i++)
+		{
+			for(int j=0; j<onodes[i].getChildCount(); j++)
+			{
+				cnodes[count]=(DefaultMutableTreeNode)onodes[i].getChildAt(j);
+				count++;
+			}
+		}	
+		//create and add the object nodes
+		for(int i=0; i<cnodes.length; i++)
+		{
+			cnodes[i].removeAllChildren();
+			ArrayList newChildren=getActiveConstruction().getObjectsOfType((String)cnodes[i].getUserObject());
+			for(int j=0; j<newChildren.size(); j++)
+			{
+				String name=(String)newChildren.get(j);
+				cnodes[i].add(new DefaultMutableTreeNode(name));
+				
+			}
+		}
+		//repaint();
+		tree.updateUI();
+		tree.repaint();
+
+	}
+}
+

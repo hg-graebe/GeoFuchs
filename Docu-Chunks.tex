@@ -1,0 +1,86 @@
+\newcommand{\class}[1]{{\sf #1}}
+\newcommand{\method}[1]{{\sf #1}}
+\newcommand{\variable}[1]{{\sf #1}}
+\newcommand{\ind}[1]{#1\index{#1}}
+
+
+GMainFrame:
+
+The \class{GMainFrame} main frame class is the entry point of the program. As
+GUI it is composed in the usual way from different tool and status bars, a
+tree panel (HGG: removed for the moment), and a main area, the {\tt desktop}
+that holds the different GeoFuchs \ind{view}s as instances of
+\class{GChildFrame}, a \class{JInternalFrame} subclass. The {\em current view}
+is determined by the \method{desktop.getSelectedFrame()} method.
+
+Each view is a \class{InternalFrame} that hosts a \class{GCoordinateArea} as
+the main drawing area and a toolbar with some buttons. It knows about the
+associated \ind{construction} (\method{theFrame.getConstruction()}) and
+handles all actions (coordinate axes, rescaling) that are concerned with that
+specific view only (view toolbar and {\em View pull-down menu} (Ansicht) of
+the main frame). They are directly passed to the drawing area for processing.
+Moving and rescaling the view does not affect the underlying construction.
+
+The view's \class{GCoordinateArea} hosts additionally an affine transformation
+matrix between the (mouse) coordinates of the view and the (world) coordinates
+of the construction.  It handles all mouse and keyboard based events
+and passes them to the underlying construction. \class{GInteractionArea} can
+be removed, since it is only used in \class{GCoordinateArea}. 
+
+ToDo: Better to understand the event handling mechanism. My idea: GMainFrame
+knows desktop, desktop knows all GChildFrames, each GChildFrame knows its
+GeoConstruction. GMainFrame handles all file menu and settings actions (set
+the globally defined point and line colors for the next GeoObjects to be
+created etc.)  Pushing other buttons in the GMainFrame changes the {\bf state}
+according to that all actions within the currentFrame are interpreted.
+Possible states are:
+\begin{itemize}
+\item (Display Change Action) Select GeoObjects in the currentConstruction to
+  change their display options: get selection from currentView, open a
+  dialogue menu as in ZuL, update options, update (through desktop) all
+  related GChildFrames.
+\item (Move Action) Select a GeoObject in the currentConstruction and move it:
+  get selection from currentView, listen to MouseEvents, pass information to
+  currentConstruction, update (through desktop) all related GChildFrames.
+\item (Construction Step Action) Select a GeoTool and start a construction
+  step: create a new GeoTool instance that controls the execution, i.e.,
+  watches MouseEvents from currentView, gets desired selections from
+  currentView, starts preview generation (this is tool specific!) via
+  currentConstruction and, if all stuff is collected, updates
+  currentConstruction and (through desktop) all related GChildFrames. This
+  state can be interrupted, postponed (e.g., for moving some GeoObjects to a
+  more convenient position) and restarted at the interruption point later on
+  as long as the currentView does not change.
+\end{itemize}
+The description of the third item shows that much stuff in
+\class{GCoordinateArea} should be refactored across these lines.  This should
+be done through the newly added classes \class{GToolkit} (a hook for a more
+sophisticated scan for all available GeoTools that contains -- for the moment
+-- a list of all refactored GeoTools and a \method{createMenu(GMainFrame)}
+method that returns a \class{JMenu} with all GeoTools to be incorporated into
+the \class{GMainFrame}) and \class{ToolAction} that sets the
+\variable{mainFrame.currentTool} to \variable{this.tool}.
+
+Some more notes on the way, not yet serious:
+
+A construction can have different views. Opening a construction a single
+standard view is created. New views are created cloning currentView.  The tree
+panel shows the \ind{tree view} of the currentConstruction (switched off for
+the moment -- HGG).
+
+A construction is a DAG of \class{GeoObjects} (g.o.) compiled step by step
+applying \ind{construction tools} (c.t.) to create new g.o.s from the already
+existing ones. The latter are the \ind{anchestors} of the new g.o.  Each g.o.\ 
+is described by its coordinates that are computed via the c.t.\ algorithm
+(c.t.a.) from the g.o.\ coordinates of the anchestors and the {\em display
+  properties} (color, name, display mode etc.).
+
+The display state of a new g.o.\ is determined by {\em global settings}
+managed via the {\em state pull-down menu}.  It can be changed in a Display
+Change Action. 
+
+The available c.t.s are collected in the {\em tools pull-down menu}.  For easy
+extension they are collected in a \class{GToolkit} object that is provided to
+\class{GMainFrame} as parameter. 
+
+
